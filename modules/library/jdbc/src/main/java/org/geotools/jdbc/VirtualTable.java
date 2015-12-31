@@ -173,7 +173,7 @@ public class VirtualTable implements Serializable {
     public String expandParameters(Hints hints) throws SQLException {
         // no need for expansion if we don't have parameters
         if (parameters.size() == 0) {
-            return sql;
+            return postProcessSql(sql);
         }
 
         // grab the parameter values
@@ -217,7 +217,23 @@ public class VirtualTable implements Serializable {
             result = result.replace("%" + param.getName() + "%", value);
         }
         
-        return result;
+        return postProcessSql(result);
+    }
+
+    /**
+     * Detects special syntax and translate accordingly
+     *
+     * @param sql
+     * @return
+     */
+    private String postProcessSql(String sql)
+    {
+        if (sql.startsWith("#!")) {
+            LOGGER.warning("shebang found!");
+            return sql.substring(2);
+        }
+        else
+            return sql;
     }
 
     /**
