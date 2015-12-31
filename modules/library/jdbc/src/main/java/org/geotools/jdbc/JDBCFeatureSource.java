@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
 
 import org.geotools.data.DefaultQuery;
 import org.geotools.data.FeatureReader;
@@ -828,7 +829,28 @@ public class JDBCFeatureSource extends ContentFeatureSource {
 
         return result;
     }
-    
+
+    private static boolean expandParametersWithFilterPush(VirtualTable vtable, StringBuffer sql)
+            throws SQLException {
+        String sFrom = vtable.expandParameters(null);
+        Matcher markerMatcher = VirtualTable.markerPattern.matcher(sFrom);
+        boolean ret = false;
+        StringBuffer sb = new StringBuffer();
+        while (markerMatcher.find()) {
+            if (markerMatcher.group(1).startsWith(VirtualTable.BboxRangePrefix)) {
+                LOGGER.fine("bboxRange found");
+                markerMatcher.appendReplacement(sb, "");
+            } else {
+                LOGGER.fine("pushedFilter found");
+                ret = true;
+                markerMatcher.appendReplacement(sb, "(1 = 0)");
+            }
+        }
+        markerMatcher.appendTail(sb);
+        sql.append(sb);
+        return ret;
+    }
+
     /**
      * Computes the column metadata by running the virtual table query
      * @param cx
@@ -848,11 +870,12 @@ public class JDBCFeatureSource extends ContentFeatureSource {
             // and just grab the metadata instead
             StringBuffer sb = new StringBuffer();
             sb.append("select * from (");
-            sb.append(vtable.expandParameters(null));
+            boolean filterPushed = expandParametersWithFilterPush(vtable, sb);
             sb.append(")");
             dialect.encodeTableAlias("vtable", sb);
             // state we don't want rows, we just want to gather the results metadata
-            sb.append( " where 1 = 0");
+            if (! filterPushed)
+                sb.append( " where 1 = 0");
             sql = sb.toString();
             
             st = cx.createStatement();

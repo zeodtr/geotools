@@ -45,6 +45,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
+import java.util.regex.Matcher;
 
 import javax.sql.DataSource;
 
@@ -3109,15 +3110,31 @@ public final class JDBCDataStore extends ContentDataStore
 
         //from
         sql.append(" FROM ");
-        encodeTableName(featureType.getTypeName(), sql, query.getHints());
+        TableEncodingInfo tableEncodingInfo = encodeTableNameWithFilterPush(
+            featureType.getTypeName(), sql, query.getHints());
 
         //filtering
         Filter filter = query.getFilter();
         if (filter != null && !Filter.INCLUDE.equals(filter)) {
-            sql.append(" WHERE ");
-            
-            //encode filter
-            filter(featureType, filter, sql);
+            if (tableEncodingInfo.hasPushedFilter || tableEncodingInfo.hasPushedBboxRangeFilter) {
+                String sSql = sql.toString();
+                Matcher markerMatcher = VirtualTable.pushedFilterMarkerPattern.matcher(sSql);
+                sql.setLength(0);
+                int index = 0;
+                while (markerMatcher.find()) {
+                    StringBuffer sbFilter = new StringBuffer();
+                    filter(featureType, filter, sbFilter,
+                        tableEncodingInfo.pushedFilterInfos.get(index).bboxRange);
+                    markerMatcher.appendReplacement(sql, "(" + sbFilter.toString() + ")");
+                    index++;
+                }
+                markerMatcher.appendTail(sql);
+            } else {
+                sql.append(" WHERE ");
+
+                //encode filter
+                filter(featureType, filter, sql, null);
+            }
         }
 
         //sorting
@@ -3233,7 +3250,8 @@ public final class JDBCDataStore extends ContentDataStore
         }
     }
 
-    FilterToSQL filter(SimpleFeatureType featureType, Filter filter, StringBuffer sql) throws IOException {
+    FilterToSQL filter(SimpleFeatureType featureType, Filter filter, StringBuffer sql, String bboxRange)
+        throws IOException {
         
         try {
             // grab the full feature type, as we might be encoding a filter
@@ -3241,6 +3259,8 @@ public final class JDBCDataStore extends ContentDataStore
             SimpleFeatureType fullSchema = getSchema(featureType.getTypeName());
             FilterToSQL toSQL = dialect instanceof PreparedStatementSQLDialect ? 
                 createPreparedFilterToSQL(fullSchema) : createFilterToSQL(fullSchema);
+            if (bboxRange != null)
+                toSQL.setBboxRange(bboxRange);
             toSQL.setInline(true);
             sql.append(" ").append(toSQL.encodeToString(filter));
             return toSQL;
@@ -3293,6 +3313,64 @@ public final class JDBCDataStore extends ContentDataStore
         }
     }
 
+    static class PushedFilterInfo {
+        String bboxRange;  // if null, pushedFilter. else, pushedBboxRangeFilter.
+        PreparedFilterToSQL toSQL;  // filled when preparing SQL
+        String sql;
+    }
+
+    static class TableEncodingInfo {
+        boolean hasPushedFilter;
+        boolean hasPushedBboxRangeFilter;
+        ArrayList<PushedFilterInfo> pushedFilterInfos;
+    }
+
+    private TableEncodingInfo encodeTableNameWithFilterPush(String tableName, StringBuffer sql,
+            Hints hints) throws SQLException {
+        StringBuffer sbFrom = new StringBuffer();
+        encodeTableName(tableName, sbFrom, hints);
+        TableEncodingInfo info = new TableEncodingInfo();
+        String sFrom = sbFrom.toString();
+        Matcher markerMatcher = VirtualTable.markerPattern.matcher(sFrom);
+        PushedFilterInfo basicPushedFilterInfo = null;
+        PushedFilterInfo currentPushedFilterInfo = null;
+        StringBuffer sb = new StringBuffer();
+        while (markerMatcher.find()) {
+            if (markerMatcher.group(1).startsWith(VirtualTable.BboxRangePrefix)) {
+                LOGGER.fine("bboxRange found");
+                String bboxRange = markerMatcher.group(2);
+                if (bboxRange.isEmpty())
+                    bboxRange = null;
+                if (bboxRange == null) {
+                    if (basicPushedFilterInfo == null)
+                        basicPushedFilterInfo = new PushedFilterInfo();
+                    currentPushedFilterInfo = basicPushedFilterInfo;
+                } else {
+                    currentPushedFilterInfo = new PushedFilterInfo();
+                    currentPushedFilterInfo.bboxRange = bboxRange;
+                }
+                markerMatcher.appendReplacement(sb, "");
+            } else {
+                LOGGER.fine("pushedFilter found");
+                if (info.pushedFilterInfos == null)
+                    info.pushedFilterInfos = new ArrayList<PushedFilterInfo>();
+                if (currentPushedFilterInfo == null)
+                    basicPushedFilterInfo = currentPushedFilterInfo = new PushedFilterInfo();
+                boolean isBbox = (currentPushedFilterInfo.bboxRange != null) &&
+                    markerMatcher.group(1).equals(VirtualTable.PushedBboxRangeFilter);
+                if (isBbox)
+                    info.hasPushedBboxRangeFilter = true;
+                else
+                    info.hasPushedFilter = true;
+                info.pushedFilterInfos.add(currentPushedFilterInfo);
+                markerMatcher.appendReplacement(sb, "$0");
+            }
+        }
+        markerMatcher.appendTail(sb);
+        sql.append(sb);
+        return info;
+    }
+
     /**
      * Generates a 'SELECT p1, p2, ... FROM ... WHERE ...' prepared statement.
      * 
@@ -3321,16 +3399,37 @@ public final class JDBCDataStore extends ContentDataStore
         dialect.encodePostSelect(featureType, sql);
 
         sql.append(" FROM ");
-        encodeTableName(featureType.getTypeName(), sql, query.getHints());
+        TableEncodingInfo tableEncodingInfo =
+            encodeTableNameWithFilterPush(featureType.getTypeName(), sql, query.getHints());
 
         //filtering
         PreparedFilterToSQL toSQL = null;
         Filter filter = query.getFilter();
         if (filter != null && !Filter.INCLUDE.equals(filter)) {
-            sql.append(" WHERE ");
-            
-            //encode filter
-            toSQL = (PreparedFilterToSQL) filter(featureType, filter, sql);
+            if (tableEncodingInfo.hasPushedFilter || tableEncodingInfo.hasPushedBboxRangeFilter) {
+                String sSql = sql.toString();
+                Matcher markerMatcher = VirtualTable.pushedFilterMarkerPattern.matcher(sSql);
+                sql.setLength(0);
+                int index = 0;
+                while (markerMatcher.find()) {
+                    PushedFilterInfo pushedFilterInfo = tableEncodingInfo.pushedFilterInfos.get(index);
+                    if (pushedFilterInfo.toSQL == null) {
+                        StringBuffer sbFilter = new StringBuffer();
+                        pushedFilterInfo.toSQL =
+                            (PreparedFilterToSQL) filter(featureType, filter, sbFilter,
+                                pushedFilterInfo.bboxRange);
+                        pushedFilterInfo.sql = sbFilter.toString();
+                    }
+                    markerMatcher.appendReplacement(sql, "(" + pushedFilterInfo.sql + ")");
+                    index++;
+                }
+                markerMatcher.appendTail(sql);
+            } else {
+                sql.append(" WHERE ");
+
+                //encode filter
+                toSQL = (PreparedFilterToSQL) filter(featureType, filter, sql, null);
+            }
         }
 
         //sorting
@@ -3346,10 +3445,16 @@ public final class JDBCDataStore extends ContentDataStore
         PreparedStatement ps = cx.prepareStatement(sql.toString(), ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
         ps.setFetchSize(fetchSize);
         
-        if ( toSQL != null ) {
+        if ( toSQL != null )
             setPreparedFilterValues( ps, toSQL, 0, cx );
-        } 
-        
+        else if (tableEncodingInfo.hasPushedFilter || tableEncodingInfo.hasPushedBboxRangeFilter) {
+            int offset = 0;
+            for (PushedFilterInfo pushedFilterInfo : tableEncodingInfo.pushedFilterInfos) {
+                setPreparedFilterValues( ps, pushedFilterInfo.toSQL, offset, cx );
+                offset += pushedFilterInfo.toSQL.getLiteralValues().size();
+            }
+        }
+
         return ps;
     }
     
@@ -3684,7 +3789,7 @@ public final class JDBCDataStore extends ContentDataStore
             Filter filter = query.getFilter();
             if (filter != null && !Filter.INCLUDE.equals(filter)) {
                 sql.append(" WHERE ");
-                toSQL.add(filter(featureType, filter, sql));
+                toSQL.add(filter(featureType, filter, sql, null));
             }
         }
         if(dialect.isAggregatedSortSupported(function)) {
@@ -4440,7 +4545,7 @@ public final class JDBCDataStore extends ContentDataStore
             whereEncoded = true;
             
             //encode filter
-            toSQL.add(filter(featureType, filter, sql));
+            toSQL.add(filter(featureType, filter, sql, null));
         }
 
         //filters for joined feature types
@@ -4456,7 +4561,7 @@ public final class JDBCDataStore extends ContentDataStore
                 sql.append(" AND ");
             }
 
-            toSQL.add(filter(part.getQueryFeatureType(), filter, sql));
+            toSQL.add(filter(part.getQueryFeatureType(), filter, sql, null));
         }
         
         return toSQL;

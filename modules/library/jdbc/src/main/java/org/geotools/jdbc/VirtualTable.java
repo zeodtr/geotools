@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 import org.geotools.factory.Hints;
 import org.geotools.util.logging.Logging;
@@ -173,7 +174,7 @@ public class VirtualTable implements Serializable {
     public String expandParameters(Hints hints) throws SQLException {
         // no need for expansion if we don't have parameters
         if (parameters.size() == 0) {
-            return sql;
+            return postProcessSQL(sql);
         }
 
         // grab the parameter values
@@ -217,7 +218,30 @@ public class VirtualTable implements Serializable {
             result = result.replace("%" + param.getName() + "%", value);
         }
         
-        return result;
+        return postProcessSQL(result);
+    }
+
+    /**
+     * Detects special syntax and translate accordingly
+     *
+     * @param sql
+     * @return
+     */
+    String postProcessSQL(String sql) throws SQLException
+    {
+        if (sql.startsWith("#!")) {
+            LOGGER.fine("shebang found, postProcessing");
+            String[] split = sql.substring(2).split("\\s", 2);
+            if (LOGGER.isLoggable(Level.FINE))
+                for (int i = 0; i < split.length; i++)
+                    LOGGER.fine("split[" + i + "] = [" + split[i] + "]");
+            String postProcessedSql =
+                SQLPostProcessorService.getInstance().getProvider(split[0]).postProcess(split[1]);
+            LOGGER.fine("postProcessedSql: [" + postProcessedSql + "]");
+            return postProcessedSql;
+        }
+        else
+            return sql;
     }
 
     /**
@@ -406,5 +430,11 @@ public class VirtualTable implements Serializable {
     public String toString() {
         return "VirtualTable [name=" + name + ", sql=" + sql + "]";
     }
-   
+
+    public static final String PushedBboxRangeFilter = "pushedBBOXRangeFilter";
+    public static final String BboxRangePrefix = "BBOXRange{{";
+    public static final Pattern markerPattern = Pattern.compile(
+        "%(BBOXRange\\{\\{((.|\\p{Cntrl})*)\\}\\}|pushedFilter|" + PushedBboxRangeFilter + ")%");
+    public static final Pattern pushedFilterMarkerPattern = Pattern.compile(
+        "%(pushedFilter|" + PushedBboxRangeFilter + ")%");
 }
