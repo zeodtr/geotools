@@ -173,7 +173,7 @@ public class VirtualTable implements Serializable {
     public String expandParameters(Hints hints) throws SQLException {
         // no need for expansion if we don't have parameters
         if (parameters.size() == 0) {
-            return postProcessSql(sql);
+            return postProcessSQL(sql);
         }
 
         // grab the parameter values
@@ -217,7 +217,7 @@ public class VirtualTable implements Serializable {
             result = result.replace("%" + param.getName() + "%", value);
         }
         
-        return postProcessSql(result);
+        return postProcessSQL(result);
     }
 
     /**
@@ -226,11 +226,17 @@ public class VirtualTable implements Serializable {
      * @param sql
      * @return
      */
-    private String postProcessSql(String sql)
+    String postProcessSQL(String sql) throws SQLException
     {
         if (sql.startsWith("#!")) {
             LOGGER.warning("shebang found!");
-            return sql.substring(2);
+            String[] split = sql.substring(2).split("\\s", 2);
+            for (int i = 0; i < split.length; i++)
+                LOGGER.warning("split[" + i + "] = [" + split[i] + "]");
+            String postProcessedSql =
+                SQLPostProcessorService.getInstance().getProvider(split[0]).postProcess(split[1]);
+            LOGGER.warning("postProcessedSql: [" + postProcessedSql + "]");
+            return postProcessedSql;
         }
         else
             return sql;
