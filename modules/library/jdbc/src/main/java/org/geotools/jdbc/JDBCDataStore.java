@@ -3109,15 +3109,25 @@ public final class JDBCDataStore extends ContentDataStore
 
         //from
         sql.append(" FROM ");
-        encodeTableName(featureType.getTypeName(), sql, query.getHints());
+        boolean pushFilter = encodeTableNameWithFilterPush(featureType.getTypeName(), sql,
+            query.getHints());
 
         //filtering
         Filter filter = query.getFilter();
         if (filter != null && !Filter.INCLUDE.equals(filter)) {
-            sql.append(" WHERE ");
-            
-            //encode filter
-            filter(featureType, filter, sql);
+            if (pushFilter) {
+                String sSql = sql.toString();
+                StringBuffer sbFilter = new StringBuffer();
+                filter(featureType, filter, sbFilter);
+                String sFilter = sbFilter.toString();
+                String sNewSql = sSql.replace(VirtualTable.PUSHED_FILTER_MARKER, sFilter);
+                sql.replace(0, sql.length(), sNewSql);
+            } else {
+                sql.append(" WHERE ");
+
+                //encode filter
+                filter(featureType, filter, sql);
+            }
         }
 
         //sorting
@@ -3293,6 +3303,18 @@ public final class JDBCDataStore extends ContentDataStore
         }
     }
 
+    private boolean encodeTableNameWithFilterPush(String tableName, StringBuffer sql, Hints hints)
+            throws SQLException {
+        StringBuffer sbFrom = new StringBuffer();
+        encodeTableName(tableName, sbFrom, hints);
+        String sFrom = sbFrom.toString();
+        boolean ret = sFrom.contains(VirtualTable.PUSHED_FILTER_MARKER);
+        if (ret)
+            LOGGER.warning("pushedFilterMarker found!");
+        sql.append(sFrom);
+        return ret;
+    }
+
     /**
      * Generates a 'SELECT p1, p2, ... FROM ... WHERE ...' prepared statement.
      * 
@@ -3321,16 +3343,29 @@ public final class JDBCDataStore extends ContentDataStore
         dialect.encodePostSelect(featureType, sql);
 
         sql.append(" FROM ");
-        encodeTableName(featureType.getTypeName(), sql, query.getHints());
+        boolean pushFilter = encodeTableNameWithFilterPush(featureType.getTypeName(), sql,
+            query.getHints());
 
         //filtering
         PreparedFilterToSQL toSQL = null;
         Filter filter = query.getFilter();
+        int replaceCount = 1;
         if (filter != null && !Filter.INCLUDE.equals(filter)) {
-            sql.append(" WHERE ");
-            
-            //encode filter
-            toSQL = (PreparedFilterToSQL) filter(featureType, filter, sql);
+            if (pushFilter) {
+                String sSql = sql.toString();
+                StringBuffer sbFilter = new StringBuffer();
+                toSQL = (PreparedFilterToSQL) filter(featureType, filter, sbFilter);
+                String sFilter = "(" + sbFilter.toString() + ")";
+                String sNewSql = sSql.replace(VirtualTable.PUSHED_FILTER_MARKER, sFilter);
+                replaceCount = (sNewSql.length() - sSql.length()) /
+                    (sFilter.length() - VirtualTable.PUSHED_FILTER_MARKER.length());
+                sql.replace(0, sql.length(), sNewSql);
+            } else {
+                sql.append(" WHERE ");
+
+                //encode filter
+                toSQL = (PreparedFilterToSQL) filter(featureType, filter, sql);
+            }
         }
 
         //sorting
@@ -3347,8 +3382,12 @@ public final class JDBCDataStore extends ContentDataStore
         ps.setFetchSize(fetchSize);
         
         if ( toSQL != null ) {
-            setPreparedFilterValues( ps, toSQL, 0, cx );
-        } 
+            int offset = 0;
+            for (int i = 0; i < replaceCount; i++) {
+                setPreparedFilterValues( ps, toSQL, offset, cx );
+                offset += toSQL.getLiteralValues().size();
+            }
+        }
         
         return ps;
     }

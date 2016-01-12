@@ -428,5 +428,7 @@ public class VirtualTable implements Serializable {
     public String toString() {
         return "VirtualTable [name=" + name + ", sql=" + sql + "]";
     }
-   
+
+    public static final String PUSHED_FILTER_MARKER = "%pushedFilter%";
+
 }

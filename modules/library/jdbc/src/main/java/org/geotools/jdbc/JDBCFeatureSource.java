@@ -828,7 +828,19 @@ public class JDBCFeatureSource extends ContentFeatureSource {
 
         return result;
     }
-    
+
+    private static boolean expandParametersWithFilterPush(VirtualTable vtable, StringBuffer sql)
+            throws SQLException {
+        String sFrom = vtable.expandParameters(null);
+        boolean ret = sFrom.contains(VirtualTable.PUSHED_FILTER_MARKER);
+        if (ret) {
+            LOGGER.warning("pushedFilterMarker found!");
+            sFrom = sFrom.replace(VirtualTable.PUSHED_FILTER_MARKER, "(1 = 0)");
+        }
+        sql.append(sFrom);
+        return ret;
+    }
+
     /**
      * Computes the column metadata by running the virtual table query
      * @param cx
@@ -848,11 +860,12 @@ public class JDBCFeatureSource extends ContentFeatureSource {
             // and just grab the metadata instead
             StringBuffer sb = new StringBuffer();
             sb.append("select * from (");
-            sb.append(vtable.expandParameters(null));
+            boolean filterPushed = expandParametersWithFilterPush(vtable, sb);
             sb.append(")");
             dialect.encodeTableAlias("vtable", sb);
             // state we don't want rows, we just want to gather the results metadata
-            sb.append( " where 1 = 0");
+            if (! filterPushed)
+                sb.append( " where 1 = 0");
             sql = sb.toString();
             
             st = cx.createStatement();
