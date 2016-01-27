@@ -229,13 +229,14 @@ public class VirtualTable implements Serializable {
     String postProcessSQL(String sql) throws SQLException
     {
         if (sql.startsWith("#!")) {
-            LOGGER.warning("shebang found!");
+            LOGGER.fine("shebang found, postProcessing");
             String[] split = sql.substring(2).split("\\s", 2);
-            for (int i = 0; i < split.length; i++)
-                LOGGER.warning("split[" + i + "] = [" + split[i] + "]");
+            if (LOGGER.isLoggable(Level.FINE))
+                for (int i = 0; i < split.length; i++)
+                    LOGGER.fine("split[" + i + "] = [" + split[i] + "]");
             String postProcessedSql =
                 SQLPostProcessorService.getInstance().getProvider(split[0]).postProcess(split[1]);
-            LOGGER.warning("postProcessedSql: [" + postProcessedSql + "]");
+            LOGGER.fine("postProcessedSql: [" + postProcessedSql + "]");
             return postProcessedSql;
         }
         else

@@ -3310,7 +3310,7 @@ public final class JDBCDataStore extends ContentDataStore
         String sFrom = sbFrom.toString();
         boolean ret = sFrom.contains(VirtualTable.PUSHED_FILTER_MARKER);
         if (ret)
-            LOGGER.warning("pushedFilterMarker found!");
+            LOGGER.fine("pushedFilterMarker found");
         sql.append(sFrom);
         return ret;
     }

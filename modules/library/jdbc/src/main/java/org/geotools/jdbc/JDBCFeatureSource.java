@@ -834,7 +834,7 @@ public class JDBCFeatureSource extends ContentFeatureSource {
         String sFrom = vtable.expandParameters(null);
         boolean ret = sFrom.contains(VirtualTable.PUSHED_FILTER_MARKER);
         if (ret) {
-            LOGGER.warning("pushedFilterMarker found!");
+            LOGGER.fine("pushedFilterMarker found");
             sFrom = sFrom.replace(VirtualTable.PUSHED_FILTER_MARKER, "(1 = 0)");
         }
         sql.append(sFrom);
