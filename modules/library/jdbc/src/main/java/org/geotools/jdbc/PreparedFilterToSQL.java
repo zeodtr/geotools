@@ -30,6 +30,7 @@ import org.opengis.filter.expression.Literal;
 import org.opengis.filter.identity.Identifier;
 
 import com.vividsolutions.jts.geom.Geometry;
+import org.opengis.filter.spatial.BBOX;
 
 /**
  * Extension of FilterToSQL intended for use with prepared statements.
@@ -220,6 +221,27 @@ public class PreparedFilterToSQL extends FilterToSQL {
      */
     public List<Integer> getDimensions() {
         return dimensions;
+    }
+
+    private void addLiteralDouble(double d) {
+        Object literalValue = Double.valueOf(d);
+        literalValues.add(literalValue);
+        SRIDs.add(null);
+        dimensions.add(null);
+        literalTypes.add(literalValue.getClass());
+    }
+
+    public Object visitBBoxRange(BBOX bbox, Object extraData) {
+        try {
+            out.write("(" + bboxRange + ")");
+            addLiteralDouble(bbox.getMinX());
+            addLiteralDouble(bbox.getMaxX());
+            addLiteralDouble(bbox.getMinY());
+            addLiteralDouble(bbox.getMaxY());
+        } catch (IOException ioe) {
+            throw new RuntimeException(IO_ERROR, ioe);
+        }
+        return extraData;
     }
 
 }

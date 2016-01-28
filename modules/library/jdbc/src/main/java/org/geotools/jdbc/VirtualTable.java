@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 import org.geotools.factory.Hints;
 import org.geotools.util.logging.Logging;
@@ -431,5 +432,5 @@ public class VirtualTable implements Serializable {
     }
 
     public static final String PUSHED_FILTER_MARKER = "%pushedFilter%";
-
+    public static final Pattern bboxRangePattern = Pattern.compile("%BBOXRange\\{\\{((.|\\p{Cntrl})*)\\}\\}%");
 }

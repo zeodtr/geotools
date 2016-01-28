@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
 
 import org.geotools.data.DefaultQuery;
 import org.geotools.data.FeatureReader;
@@ -834,8 +835,13 @@ public class JDBCFeatureSource extends ContentFeatureSource {
         String sFrom = vtable.expandParameters(null);
         boolean ret = sFrom.contains(VirtualTable.PUSHED_FILTER_MARKER);
         if (ret) {
-            LOGGER.fine("pushedFilterMarker found");
+            LOGGER.fine("pushedFilter found");
             sFrom = sFrom.replace(VirtualTable.PUSHED_FILTER_MARKER, "(1 = 0)");
+        }
+        Matcher matcher = VirtualTable.bboxRangePattern.matcher(sFrom);
+        if (matcher.find()) {
+            LOGGER.fine("bboxRange found");
+            sFrom = matcher.replaceAll("");  // not needed here
         }
         sql.append(sFrom);
         return ret;
