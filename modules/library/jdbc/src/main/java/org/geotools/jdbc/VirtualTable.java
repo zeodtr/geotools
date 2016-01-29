@@ -431,6 +431,10 @@ public class VirtualTable implements Serializable {
         return "VirtualTable [name=" + name + ", sql=" + sql + "]";
     }
 
-    public static final String PUSHED_FILTER_MARKER = "%pushedFilter%";
-    public static final Pattern bboxRangePattern = Pattern.compile("%BBOXRange\\{\\{((.|\\p{Cntrl})*)\\}\\}%");
+    public static final String PushedBboxRangeFilter = "pushedBBOXRangeFilter";
+    public static final String BboxRangePrefix = "BBOXRange{{";
+    public static final Pattern markerPattern = Pattern.compile(
+        "%(BBOXRange\\{\\{((.|\\p{Cntrl})*)\\}\\}|pushedFilter|" + PushedBboxRangeFilter + ")%");
+    public static final Pattern pushedFilterMarkerPattern = Pattern.compile(
+        "%(pushedFilter|" + PushedBboxRangeFilter + ")%");
 }

@@ -3116,18 +3116,24 @@ public final class JDBCDataStore extends ContentDataStore
         //filtering
         Filter filter = query.getFilter();
         if (filter != null && !Filter.INCLUDE.equals(filter)) {
-            if (tableEncodingInfo.pushFilter) {
+            if (tableEncodingInfo.hasPushedFilter || tableEncodingInfo.hasPushedBboxRangeFilter) {
                 String sSql = sql.toString();
-                StringBuffer sbFilter = new StringBuffer();
-                filter(featureType, filter, sbFilter, tableEncodingInfo.bboxRange);
-                String sFilter = sbFilter.toString();
-                String sNewSql = sSql.replace(VirtualTable.PUSHED_FILTER_MARKER, sFilter);
-                sql.replace(0, sql.length(), sNewSql);
+                Matcher markerMatcher = VirtualTable.pushedFilterMarkerPattern.matcher(sSql);
+                sql.setLength(0);
+                int index = 0;
+                while (markerMatcher.find()) {
+                    StringBuffer sbFilter = new StringBuffer();
+                    filter(featureType, filter, sbFilter,
+                        tableEncodingInfo.pushedFilterInfos.get(index).bboxRange);
+                    markerMatcher.appendReplacement(sql, "(" + sbFilter.toString() + ")");
+                    index++;
+                }
+                markerMatcher.appendTail(sql);
             } else {
                 sql.append(" WHERE ");
 
                 //encode filter
-                filter(featureType, filter, sql, tableEncodingInfo.bboxRange);
+                filter(featureType, filter, sql, null);
             }
         }
 
@@ -3307,9 +3313,15 @@ public final class JDBCDataStore extends ContentDataStore
         }
     }
 
+    static class PushedFilterInfo {
+        String bboxRange;  // if null, pushedFilter. else, pushedBboxRangeFilter.
+        PreparedFilterToSQL toSQL;  // filled when preparing SQL
+    }
+
     static class TableEncodingInfo {
-        boolean pushFilter;
-        String bboxRange;
+        boolean hasPushedFilter;
+        boolean hasPushedBboxRangeFilter;
+        ArrayList<PushedFilterInfo> pushedFilterInfos;
     }
 
     private TableEncodingInfo encodeTableNameWithFilterPush(String tableName, StringBuffer sql,
@@ -3318,16 +3330,43 @@ public final class JDBCDataStore extends ContentDataStore
         encodeTableName(tableName, sbFrom, hints);
         TableEncodingInfo info = new TableEncodingInfo();
         String sFrom = sbFrom.toString();
-        info.pushFilter = sFrom.contains(VirtualTable.PUSHED_FILTER_MARKER);
-        if (info.pushFilter)
-            LOGGER.fine("pushedFilter found");
-        Matcher matcher = VirtualTable.bboxRangePattern.matcher(sFrom);
-        if (matcher.find()) {
-            LOGGER.fine("bboxRange found");
-            info.bboxRange = matcher.group(1);
-            sFrom = matcher.replaceAll("");
+        Matcher markerMatcher = VirtualTable.markerPattern.matcher(sFrom);
+        PushedFilterInfo basicPushedFilterInfo = null;
+        PushedFilterInfo currentPushedFilterInfo = null;
+        StringBuffer sb = new StringBuffer();
+        while (markerMatcher.find()) {
+            if (markerMatcher.group(1).startsWith(VirtualTable.BboxRangePrefix)) {
+                LOGGER.fine("bboxRange found");
+                String bboxRange = markerMatcher.group(2);
+                if (bboxRange.isEmpty())
+                    bboxRange = null;
+                if (bboxRange == null) {
+                    if (basicPushedFilterInfo == null)
+                        basicPushedFilterInfo = new PushedFilterInfo();
+                    currentPushedFilterInfo = basicPushedFilterInfo;
+                } else {
+                    currentPushedFilterInfo = new PushedFilterInfo();
+                    currentPushedFilterInfo.bboxRange = bboxRange;
+                }
+                markerMatcher.appendReplacement(sb, "");
+            } else {
+                LOGGER.fine("pushedFilter found");
+                if (info.pushedFilterInfos == null)
+                    info.pushedFilterInfos = new ArrayList<PushedFilterInfo>();
+                if (currentPushedFilterInfo == null)
+                    basicPushedFilterInfo = currentPushedFilterInfo = new PushedFilterInfo();
+                boolean isBbox = (currentPushedFilterInfo.bboxRange != null) &&
+                    markerMatcher.group(1).equals(VirtualTable.PushedBboxRangeFilter);
+                if (isBbox)
+                    info.hasPushedBboxRangeFilter = true;
+                else
+                    info.hasPushedFilter = true;
+                info.pushedFilterInfos.add(currentPushedFilterInfo);
+                markerMatcher.appendReplacement(sb, "$0");
+            }
         }
-        sql.append(sFrom);
+        markerMatcher.appendTail(sb);
+        sql.append(sb);
         return info;
     }
 
@@ -3365,22 +3404,28 @@ public final class JDBCDataStore extends ContentDataStore
         //filtering
         PreparedFilterToSQL toSQL = null;
         Filter filter = query.getFilter();
-        int replaceCount = 1;
         if (filter != null && !Filter.INCLUDE.equals(filter)) {
-            if (tableEncodingInfo.pushFilter) {
+            if (tableEncodingInfo.hasPushedFilter || tableEncodingInfo.hasPushedBboxRangeFilter) {
                 String sSql = sql.toString();
-                StringBuffer sbFilter = new StringBuffer();
-                toSQL = (PreparedFilterToSQL) filter(featureType, filter, sbFilter, tableEncodingInfo.bboxRange);
-                String sFilter = "(" + sbFilter.toString() + ")";
-                String sNewSql = sSql.replace(VirtualTable.PUSHED_FILTER_MARKER, sFilter);
-                replaceCount = (sNewSql.length() - sSql.length()) /
-                    (sFilter.length() - VirtualTable.PUSHED_FILTER_MARKER.length());
-                sql.replace(0, sql.length(), sNewSql);
+                Matcher markerMatcher = VirtualTable.pushedFilterMarkerPattern.matcher(sSql);
+                sql.setLength(0);
+                int index = 0;
+                while (markerMatcher.find()) {
+                    StringBuffer sbFilter = new StringBuffer();
+                    PushedFilterInfo pushedFilterInfo = tableEncodingInfo.pushedFilterInfos.get(index);
+                    if (pushedFilterInfo.toSQL == null)
+                    pushedFilterInfo.toSQL =
+                        (PreparedFilterToSQL) filter(featureType, filter, sbFilter,
+                            pushedFilterInfo.bboxRange);
+                    markerMatcher.appendReplacement(sql, "(" + sbFilter.toString() + ")");
+                    index++;
+                }
+                markerMatcher.appendTail(sql);
             } else {
                 sql.append(" WHERE ");
 
                 //encode filter
-                toSQL = (PreparedFilterToSQL) filter(featureType, filter, sql, tableEncodingInfo.bboxRange);
+                toSQL = (PreparedFilterToSQL) filter(featureType, filter, sql, null);
             }
         }
 
@@ -3397,14 +3442,16 @@ public final class JDBCDataStore extends ContentDataStore
         PreparedStatement ps = cx.prepareStatement(sql.toString(), ResultSet.TYPE_FORWARD_ONLY, ResultSet.CONCUR_READ_ONLY);
         ps.setFetchSize(fetchSize);
         
-        if ( toSQL != null ) {
+        if ( toSQL != null )
+            setPreparedFilterValues( ps, toSQL, 0, cx );
+        else if (tableEncodingInfo.hasPushedFilter || tableEncodingInfo.hasPushedBboxRangeFilter) {
             int offset = 0;
-            for (int i = 0; i < replaceCount; i++) {
-                setPreparedFilterValues( ps, toSQL, offset, cx );
-                offset += toSQL.getLiteralValues().size();
+            for (PushedFilterInfo pushedFilterInfo : tableEncodingInfo.pushedFilterInfos) {
+                setPreparedFilterValues( ps, pushedFilterInfo.toSQL, offset, cx );
+                offset += pushedFilterInfo.toSQL.getLiteralValues().size();
             }
         }
-        
+
         return ps;
     }
     

@@ -833,17 +833,21 @@ public class JDBCFeatureSource extends ContentFeatureSource {
     private static boolean expandParametersWithFilterPush(VirtualTable vtable, StringBuffer sql)
             throws SQLException {
         String sFrom = vtable.expandParameters(null);
-        boolean ret = sFrom.contains(VirtualTable.PUSHED_FILTER_MARKER);
-        if (ret) {
-            LOGGER.fine("pushedFilter found");
-            sFrom = sFrom.replace(VirtualTable.PUSHED_FILTER_MARKER, "(1 = 0)");
+        Matcher markerMatcher = VirtualTable.markerPattern.matcher(sFrom);
+        boolean ret = false;
+        StringBuffer sb = new StringBuffer();
+        while (markerMatcher.find()) {
+            if (markerMatcher.group(1).startsWith(VirtualTable.BboxRangePrefix)) {
+                LOGGER.fine("bboxRange found");
+                markerMatcher.appendReplacement(sb, "");
+            } else {
+                LOGGER.fine("pushedFilter found");
+                ret = true;
+                markerMatcher.appendReplacement(sb, "(1 = 0)");
+            }
         }
-        Matcher matcher = VirtualTable.bboxRangePattern.matcher(sFrom);
-        if (matcher.find()) {
-            LOGGER.fine("bboxRange found");
-            sFrom = matcher.replaceAll("");  // not needed here
-        }
-        sql.append(sFrom);
+        markerMatcher.appendTail(sb);
+        sql.append(sb);
         return ret;
     }
 
