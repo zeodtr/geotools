@@ -3316,6 +3316,7 @@ public final class JDBCDataStore extends ContentDataStore
     static class PushedFilterInfo {
         String bboxRange;  // if null, pushedFilter. else, pushedBboxRangeFilter.
         PreparedFilterToSQL toSQL;  // filled when preparing SQL
+        String sql;
     }
 
     static class TableEncodingInfo {
@@ -3411,13 +3412,15 @@ public final class JDBCDataStore extends ContentDataStore
                 sql.setLength(0);
                 int index = 0;
                 while (markerMatcher.find()) {
-                    StringBuffer sbFilter = new StringBuffer();
                     PushedFilterInfo pushedFilterInfo = tableEncodingInfo.pushedFilterInfos.get(index);
-                    if (pushedFilterInfo.toSQL == null)
-                    pushedFilterInfo.toSQL =
-                        (PreparedFilterToSQL) filter(featureType, filter, sbFilter,
-                            pushedFilterInfo.bboxRange);
-                    markerMatcher.appendReplacement(sql, "(" + sbFilter.toString() + ")");
+                    if (pushedFilterInfo.toSQL == null) {
+                        StringBuffer sbFilter = new StringBuffer();
+                        pushedFilterInfo.toSQL =
+                            (PreparedFilterToSQL) filter(featureType, filter, sbFilter,
+                                pushedFilterInfo.bboxRange);
+                        pushedFilterInfo.sql = sbFilter.toString();
+                    }
+                    markerMatcher.appendReplacement(sql, "(" + pushedFilterInfo.sql + ")");
                     index++;
                 }
                 markerMatcher.appendTail(sql);
