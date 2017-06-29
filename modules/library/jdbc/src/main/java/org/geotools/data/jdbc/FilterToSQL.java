@@ -40,6 +40,7 @@ import org.geotools.filter.LikeFilterImpl;
 import org.geotools.filter.capability.FunctionNameImpl;
 import org.geotools.jdbc.JDBCDataStore;
 import org.geotools.jdbc.JoinPropertyName;
+import org.geotools.jdbc.PreparedFilterToSQL;
 import org.geotools.jdbc.PrimaryKey;
 import org.geotools.util.ConverterFactory;
 import org.geotools.util.Converters;
@@ -206,6 +207,8 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
     /** inline flag, controlling whether "WHERE" will prefix the SQL encoded filter */
     protected boolean inline = false;
 
+    protected String bboxRange;
+
     /**
      * Default constructor
      */
@@ -227,6 +230,8 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
     public void setInline(boolean inline) {
         this.inline = inline;
     }
+
+    public void setBboxRange(String bboxRange) { this.bboxRange = bboxRange; }
 
     /**
      * Performs the encoding, sends the encoded sql to the writer passed in.
@@ -1010,6 +1015,9 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
         }
 
         if (e1 instanceof PropertyName && e2 instanceof Literal) {
+            if ((bboxRange != null) && (filter instanceof BBOX) &&
+                (this instanceof PreparedFilterToSQL) && ((PreparedFilterToSQL)this).isPrepareEnabled())
+                return ((PreparedFilterToSQL)this).visitBBoxRange((BBOX)filter, extraData);
             //call the "regular" method
             return visitBinarySpatialOperator(filter, (PropertyName)e1, (Literal)e2, filter
                     .getExpression1() instanceof Literal, extraData);
