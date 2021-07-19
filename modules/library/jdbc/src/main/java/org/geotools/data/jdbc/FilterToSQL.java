@@ -47,6 +47,7 @@ import org.geotools.filter.spatial.BBOXImpl;
 import org.geotools.jdbc.EnumMapper;
 import org.geotools.jdbc.JDBCDataStore;
 import org.geotools.jdbc.JoinPropertyName;
+import org.geotools.jdbc.PreparedFilterToSQL;
 import org.geotools.jdbc.PrimaryKey;
 import org.geotools.jdbc.PrimaryKeyColumn;
 import org.geotools.referencing.CRS;
@@ -229,6 +230,8 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
     /** Whether the encoder should try to encode "in" function into a SQL IN operator */
     protected boolean inEncodingEnabled = true;
 
+    protected String bboxRange;
+
     /** Default constructor */
     public FilterToSQL() {}
 
@@ -243,6 +246,10 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
 
     public void setInline(boolean inline) {
         this.inline = inline;
+    }
+
+    public void setBboxRange(String bboxRange) {
+        this.bboxRange = bboxRange;
     }
 
     /**
@@ -1258,6 +1265,11 @@ public class FilterToSQL implements FilterVisitor, ExpressionVisitor {
         }
 
         if (e1 instanceof PropertyName && e2 instanceof Literal) {
+            if ((bboxRange != null)
+                    && (filter instanceof BBOX)
+                    && (this instanceof PreparedFilterToSQL)
+                    && ((PreparedFilterToSQL) this).isPrepareEnabled())
+                return ((PreparedFilterToSQL) this).visitBBoxRange((BBOX) filter, extraData);
             // call the "regular" method
             return visitBinarySpatialOperator(
                     filter,

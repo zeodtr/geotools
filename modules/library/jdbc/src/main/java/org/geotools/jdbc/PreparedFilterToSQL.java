@@ -31,6 +31,8 @@ import org.opengis.feature.type.AttributeDescriptor;
 import org.opengis.filter.Id;
 import org.opengis.filter.expression.Literal;
 import org.opengis.filter.identity.Identifier;
+import org.opengis.filter.spatial.BBOX;
+import org.opengis.geometry.BoundingBox;
 
 /**
  * Extension of FilterToSQL intended for use with prepared statements.
@@ -228,5 +230,27 @@ public class PreparedFilterToSQL extends FilterToSQL {
      */
     public List<AttributeDescriptor> getDescriptors() {
         return descriptors;
+    }
+
+    private void addLiteralDouble(double d) {
+        Object literalValue = Double.valueOf(d);
+        literalValues.add(literalValue);
+        SRIDs.add(null);
+        dimensions.add(null);
+        literalTypes.add(literalValue.getClass());
+    }
+
+    public Object visitBBoxRange(BBOX bbox, Object extraData) {
+        try {
+            out.write("(" + bboxRange + ")");
+            BoundingBox bounds = bbox.getBounds();
+            addLiteralDouble(bounds.getMinX());
+            addLiteralDouble(bounds.getMaxX());
+            addLiteralDouble(bounds.getMinY());
+            addLiteralDouble(bounds.getMaxY());
+        } catch (IOException ioe) {
+            throw new RuntimeException(IO_ERROR, ioe);
+        }
+        return extraData;
     }
 }
